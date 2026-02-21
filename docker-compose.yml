@@ -1,0 +1,66 @@
+version: "3.9"
+
+# StorePing — VPS Deployment
+# Run with: docker compose up -d
+#
+# Services:
+#   db      — PostgreSQL
+#   api     — FastAPI event receiver (port 8000)
+#   bot     — Telegram bot (polling)
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB:       storeping
+      POSTGRES_USER:     storeping_user
+      POSTGRES_PASSWORD: ${DB_PASS}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U storeping_user -d storeping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: always
+    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST:     db
+      DB_PORT:     "5432"
+      DB_NAME:     storeping
+      DB_USER:     storeping_user
+      DB_PASS:     ${DB_PASS}
+      BOT_TOKEN:   ${BOT_TOKEN}
+      API_SECRET:  ${API_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bot:
+    build: .
+    restart: always
+    command: python bot.py
+    environment:
+      DB_HOST:     db
+      DB_PORT:     "5432"
+      DB_NAME:     storeping
+      DB_USER:     storeping_user
+      DB_PASS:     ${DB_PASS}
+      BOT_TOKEN:   ${BOT_TOKEN}
+      API_SECRET:  ${API_SECRET}
+      SUMMARY_HOUR:   "21"
+      SUMMARY_MINUTE: "0"
+      TIMEZONE:    America/Toronto
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
