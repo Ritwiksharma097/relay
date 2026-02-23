@@ -1,13 +1,12 @@
-# api.py — StorePing Event Receiver
+# api.py — Relay Event Receiver
 # FastAPI server running on your VPS.
 # Client PHP sites POST events here. Bot reads from the same DB.
 #
 # Endpoints:
-#   POST /event/{client_slug}   — receive any event from a client site
-#
-# Auth:
-#   Each client has a unique API secret.
-#   PHP site sends it as: Authorization: Bearer <secret>
+#   POST /event/{client_slug}/order   — receive a new order from a client site
+#   POST /event/{client_slug}/generic — receive any other event (low stock, contact, etc.)
+#   GET  /maintenance/{client_slug}   — check maintenance status
+#   GET  /health                      — uptime check
 
 import hmac
 import time
@@ -27,11 +26,11 @@ from notifier import send_order_notification, send_event_notification
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("✅ StorePing API starting")
+    print("✅ Relay API starting")
     yield
-    print("StorePing API shutting down")
+    print("Relay API shutting down")
 
-app = FastAPI(title="StorePing API", lifespan=lifespan)
+app = FastAPI(title="Relay API", lifespan=lifespan)
 
 
 # ======================
@@ -56,10 +55,6 @@ class GenericEvent(BaseModel):
 # ======================
 
 def verify_secret(client: dict, authorization: str):
-    """
-    Compare incoming secret against stored client secret.
-    Constant-time comparison to prevent timing attacks.
-    """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
@@ -75,8 +70,7 @@ def verify_secret(client: dict, authorization: str):
 
 @app.get("/health")
 async def health():
-    """Simple health check. Useful for uptime monitors."""
-    return {"status": "ok", "time": int(time.time())}
+    return {"status": "ok", "service": "relay", "time": int(time.time())}
 
 
 @app.post("/event/{client_slug}/order")
@@ -85,17 +79,12 @@ async def receive_order(
     body:           OrderEvent = ...,
     authorization:  str = Header(default=""),
 ):
-    """
-    Called by client PHP site when a new order is placed.
-    Stores the order and fires Telegram notification.
-    """
     client = db.get_client_by_slug(client_slug)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
     verify_secret(client, authorization)
 
-    # Store in our DB
     db.record_order(
         client_id=client["id"],
         order_number=body.order_number,
@@ -105,7 +94,6 @@ async def receive_order(
         received_at=body.received_at,
     )
 
-    # Fire Telegram notification (non-blocking)
     asyncio.create_task(send_order_notification(client, body.dict()))
 
     return {"ok": True}
@@ -117,10 +105,6 @@ async def receive_generic_event(
     body:           GenericEvent = ...,
     authorization:  str = Header(default=""),
 ):
-    """
-    Called by client PHP site for any non-order event.
-    Examples: low_stock alert, contact form received, etc.
-    """
     client = db.get_client_by_slug(client_slug)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -139,10 +123,6 @@ async def get_maintenance(
     client_slug:   str = Path(...),
     authorization: str = Header(default=""),
 ):
-    """
-    Called by the PHP maintenance_check.php every 30 seconds (cached).
-    Returns current maintenance status for a client.
-    """
     client = db.get_client_by_slug(client_slug)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")

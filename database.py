@@ -1,4 +1,4 @@
-# database.py — StorePing Storage Layer
+# database.py — Relay Storage Layer
 # Single access point. Nothing else touches PostgreSQL directly.
 # Multi-tenant: every table references client_id.
 
@@ -32,7 +32,6 @@ def init_db():
     conn = get_connection()
     cur  = conn.cursor()
 
-    # Clients — one row per business
     cur.execute("""
         CREATE TABLE IF NOT EXISTS clients (
             id               SERIAL PRIMARY KEY,
@@ -41,13 +40,12 @@ def init_db():
             api_secret       TEXT NOT NULL,
             telegram_chat_id BIGINT,
             currency_symbol  TEXT DEFAULT '$',
-            timezone         TEXT DEFAULT 'America/Toronto',
+            timezone         TEXT DEFAULT 'Asia/Kolkata',
             active           BOOLEAN DEFAULT TRUE,
             created_at       BIGINT NOT NULL
         )
     """)
 
-    # Orders — mirrored from client site for stats
     cur.execute("""
         CREATE TABLE IF NOT EXISTS orders (
             id            SERIAL PRIMARY KEY,
@@ -62,7 +60,6 @@ def init_db():
         )
     """)
 
-    # Events — anything that isn't an order (low_stock, contact_form, etc.)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS events (
             id          SERIAL PRIMARY KEY,
@@ -73,7 +70,6 @@ def init_db():
         )
     """)
 
-    # Telegram chats — which chats belong to which client
     cur.execute("""
         CREATE TABLE IF NOT EXISTS telegram_chats (
             id         SERIAL PRIMARY KEY,
@@ -87,7 +83,6 @@ def init_db():
         )
     """)
 
-    # Settings — key/value store per client (used for maintenance mode, etc.)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             client_id   INTEGER NOT NULL REFERENCES clients(id),
@@ -101,7 +96,7 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
-    print("✅ Database initialized")
+    print("✅ Relay database initialized")
 
 
 # ======================
@@ -127,7 +122,6 @@ def get_client_by_id(client_id: int) -> Optional[Dict]:
 
 
 def get_client_by_chat_id(chat_id: int) -> Optional[Dict]:
-    """Given a Telegram chat_id, find which client it belongs to."""
     conn = get_connection()
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
@@ -142,7 +136,7 @@ def get_client_by_chat_id(chat_id: int) -> Optional[Dict]:
 
 
 def create_client(slug: str, name: str, api_secret: str,
-                  timezone: str = "America/Toronto", currency_symbol: str = "$") -> int:
+                  timezone: str = "Asia/Kolkata", currency_symbol: str = "$") -> int:
     now  = int(time.time())
     conn = get_connection()
     cur  = conn.cursor()
@@ -158,7 +152,6 @@ def create_client(slug: str, name: str, api_secret: str,
 
 
 def set_client_chat(client_id: int, chat_id: int, chat_type: str = "private", label: str = None):
-    """Link a Telegram chat to a client. Upserts safely."""
     now  = int(time.time())
     conn = get_connection()
     cur  = conn.cursor()
@@ -184,11 +177,10 @@ def get_all_active_clients() -> List[Dict]:
 
 
 # ======================
-# SETTINGS (maintenance mode etc.)
+# SETTINGS
 # ======================
 
 def get_setting(client_id: int, key: str) -> Optional[str]:
-    """Get a setting value for a client. Returns None if not set."""
     conn = get_connection()
     cur  = conn.cursor()
     cur.execute(
@@ -201,7 +193,6 @@ def get_setting(client_id: int, key: str) -> Optional[str]:
 
 
 def set_setting(client_id: int, key: str, value: str):
-    """Set a setting for a client. Upserts."""
     now  = int(time.time())
     conn = get_connection()
     cur  = conn.cursor()
@@ -237,12 +228,12 @@ def record_order(client_id: int, order_number: str, customer_name: str,
 
 
 def get_today_stats(client_id: int) -> Dict:
-    today_start = int(time.time()) // 86400 * 86400   # midnight UTC
+    today_start = int(time.time()) // 86400 * 86400
     conn = get_connection()
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT
-            COUNT(*)            AS order_count,
+            COUNT(*)                AS order_count,
             COALESCE(SUM(total), 0) AS revenue,
             COALESCE(AVG(total), 0) AS avg_order
         FROM orders
@@ -259,7 +250,7 @@ def get_week_stats(client_id: int) -> Dict:
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT
-            COUNT(*)            AS order_count,
+            COUNT(*)                AS order_count,
             COALESCE(SUM(total), 0) AS revenue,
             COALESCE(AVG(total), 0) AS avg_order
         FROM orders
@@ -276,7 +267,7 @@ def get_month_stats(client_id: int) -> Dict:
     cur  = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("""
         SELECT
-            COUNT(*)            AS order_count,
+            COUNT(*)                AS order_count,
             COALESCE(SUM(total), 0) AS revenue,
             COALESCE(AVG(total), 0) AS avg_order
         FROM orders

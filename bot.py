@@ -1,4 +1,4 @@
-# bot.py — StorePing Telegram Bot
+# bot.py — Relay Telegram Bot
 # Handles all commands from store owners.
 #
 # Commands:
@@ -29,13 +29,13 @@ from notifier import (
     format_recent_orders,
     send_event_notification,
 )
-from config import BOT_TOKEN, SUMMARY_HOUR, SUMMARY_MINUTE
+from config import BOT_TOKEN, SUMMARY_HOUR, SUMMARY_MINUTE, TELEGRAM_GROUP_ID
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO,
 )
-log = logging.getLogger("storeping.bot")
+log = logging.getLogger("relay.bot")
 
 
 # ======================
@@ -71,7 +71,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             await update.message.reply_text(
-                "Welcome to StorePing!\n\n"
+                "Welcome to Relay!\n\n"
                 "To link this chat to your store, run:\n"
                 "`/start your-store-slug your-api-secret`",
                 parse_mode="Markdown",
@@ -107,7 +107,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(
-        f"✅ Linked! This chat will now receive notifications for *{client['name']}*\n\n"
+        f"✅ Linked! This chat will now receive Relay notifications for *{client['name']}*\n\n"
         f"Type /help to see what you can do.",
         parse_mode="Markdown",
     )
@@ -148,7 +148,6 @@ async def cmd_maintenance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = context.args
 
-    # No args — show current status
     if not args:
         current = db.get_setting(client["id"], "maintenance") or "off"
         icon    = "🔧" if current == "on" else "✅"
@@ -189,7 +188,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     client     = await get_client_for_chat(update)
     store_name = client["name"] if client else "your store"
     await update.message.reply_text(
-        f"*StorePing — {store_name}*\n"
+        f"*Relay — {store_name}*\n"
         f"\n"
         f"/today — today's orders and revenue\n"
         f"/week — last 7 days\n"
@@ -204,19 +203,17 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ======================
-# DAILY SUMMARY (runs via JobQueue — correct async pattern)
+# DAILY SUMMARY
 # ======================
 
 async def daily_summary_job(context: ContextTypes.DEFAULT_TYPE):
     """
     Called every 60 seconds by JobQueue.
-    Only fires at SUMMARY_HOUR:SUMMARY_MINUTE — ignores all other ticks.
-    Uses bot_data to track which clients already got today's summary.
+    Only fires at SUMMARY_HOUR:SUMMARY_MINUTE.
     """
     now       = datetime.now()
     today_key = str(now.date())
 
-    # Reset tracker on new day
     if context.bot_data.get("summary_last_day") != today_key:
         context.bot_data["summary_sent"]     = set()
         context.bot_data["summary_last_day"] = today_key
@@ -261,10 +258,9 @@ def main():
     app.add_handler(CommandHandler("maintenance", cmd_maintenance))
     app.add_handler(CommandHandler("help",        cmd_help))
 
-    # JobQueue handles the async scheduling correctly
     app.job_queue.run_repeating(daily_summary_job, interval=60, first=10)
 
-    log.info("✅ StorePing bot starting")
+    log.info(f"✅ Relay bot starting — group ID: {TELEGRAM_GROUP_ID}")
     app.run_polling(drop_pending_updates=True)
 
 
